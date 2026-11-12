@@ -12,7 +12,7 @@ from selenium.webdriver.edge.service import Service
 
 with tempfile.TemporaryDirectory() as temp:
     root = Path(temp)
-    (root / "cards1.html").write_text('<div class="ans-attach-ct videoContainer"><iframe src="video.html"></iframe></div><div class="ans-attach-ct"><iframe jobid="work-mixed" src="work.html"></iframe></div>', encoding="utf-8")
+    (root / "cards1.html").write_text('<div class="ans-attach-ct videoContainer"><iframe src="video.html"></iframe></div><div class="ans-attach-ct"><iframe src="work.html"></iframe></div>', encoding="utf-8")
     (root / "cards2.html").write_text('<div class="ans-attach-ct"><iframe jobid="work-test" src="work.html"></iframe></div>', encoding="utf-8")
     (root / "cards3.html").write_text('<div class="ans-attach-ct ans-job-finished"><iframe jobid="work-done" src="work.html"></iframe></div>', encoding="utf-8")
     (root / "work.html").write_text('<div class="TiMu">Question</div>', encoding="utf-8")
@@ -30,10 +30,21 @@ with tempfile.TemporaryDirectory() as temp:
     try:
         driver.get((root / "page.html").as_uri())
         assert len(directory.catalog_items(driver)) == 4
-        directory.play_video = lambda d, stop, log, index: played.append(index) or sequence.append("video") or True
+        def play(d, stop, log, index):
+            played.append(index)
+            sequence.append("video")
+            d.switch_to.default_content()
+            d.switch_to.frame(d.find_element("css selector", "iframe"))
+            d.execute_script("document.querySelector('.videoContainer').classList.add('ans-job-finished')")
+            d.switch_to.default_content()
+            return True
+        directory.play_video = play
         def solve(d, config, stop, log):
             solved.append(d.find_elements("css selector", "iframe")[0].get_attribute("src"))
             assert enter_homework_frame(d)
+            d.switch_to.default_content()
+            d.switch_to.frame(d.find_element("css selector", "iframe"))
+            d.execute_script("document.querySelector('.ans-attach-ct:not(.videoContainer)').classList.add('ans-job-finished')")
             d.switch_to.default_content()
             sequence.append("work")
             return True
@@ -41,6 +52,12 @@ with tempfile.TemporaryDirectory() as temp:
         assert played == [0] and len(solved) == 2
         assert "cards1.html" in solved[0] and "cards2.html" in solved[1]
         assert sequence[:2] == ["video", "work"]
+        driver.get((root / "page.html").as_uri())
+        failures = []
+        directory.process_directory(driver, {}, threading.Event(), failures.append,
+                                    lambda d, config, stop, log: False)
+        assert any("停在当前节" in message for message in failures)
+        assert not any("打开：Work" in message for message in failures)
         print("Directory traversal smoke test passed")
     finally:
         directory.play_video = old_play
