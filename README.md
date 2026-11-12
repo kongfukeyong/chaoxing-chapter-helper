@@ -19,7 +19,6 @@ Windows 桌面工具，处理当前打开的超星章节作业。连接专用 Ed
 
 准备 Python 3.12、Edge 和 FFmpeg，安装 `requirements.txt` 后运行 `python app.py`。Windows 便携版自带运行时和驱动。
 
-API Key 仅写入本机 `config.json`；专用浏览器资料位于 `data/edge-profile`。这些目录和文件被 `.gitignore` 排除。
 
 ## 来源与许可
 
