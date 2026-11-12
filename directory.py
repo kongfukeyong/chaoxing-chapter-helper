@@ -3,6 +3,7 @@
 import time
 
 from selenium.webdriver.common.by import By
+from chaoxing import select_learning_window
 
 
 CATALOG = ".posCatalog_name[onclick]"
@@ -137,6 +138,8 @@ def play_video(driver, stopped, log, card_index=0):
 
 
 def process_directory(driver, config, stopped, log, solve_page):
+    if not select_learning_window(driver):
+        raise RuntimeError("专用 Edge 中没有找到学生学习页面，请先打开课程。")
     items = catalog_items(driver)
     if not items:
         raise RuntimeError("当前页未找到超星课程目录，请先打开课程的学生学习页面。")
