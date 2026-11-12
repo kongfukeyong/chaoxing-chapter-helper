@@ -141,6 +141,7 @@ class Question:
     options: list = field(default_factory=list)
     element: object = None
     blank_label: str = ""
+    choice_style: str = "native"
 
 
 def element_text(element):
@@ -260,6 +261,16 @@ def fill_answer(driver, question, answer):
     letters = re.findall(r"[A-Z]", answer.upper())
     if not letters or set(letters) - valid or (question.kind == "single" and len(letters) != 1):
         return False
+    if question.choice_style == "chaoxing":
+        def selected(item):
+            return bool(item.find_elements(By.CSS_SELECTOR,
+                ".check_answer, .check_answer_dx"))
+        for letter, _, item in question.options:
+            if selected(item) != (letter in letters):
+                driver.execute_script("arguments[0].scrollIntoView({block:'center'});", item)
+                item.click()
+        return all(selected(item) == (letter in letters)
+                   for letter, _, item in question.options)
     for letter, _, field in question.options:
         should_select = letter in letters
         if should_select != field.is_selected():
