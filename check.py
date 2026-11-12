@@ -9,6 +9,7 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 import app
 from selenium import webdriver
+from selenium.webdriver.common.by import By
 from selenium.webdriver.edge.service import Service
 
 
@@ -19,7 +20,9 @@ with tempfile.TemporaryDirectory() as temp:
       <ul class="Zy_ulTop"><li><input type="radio" name="q1" value="0">A. one</li>
       <li><input type="radio" name="q1" value="1">B. two</li></ul></div>
     <div class="TiMu"><div class="Zy_TItle">Name a primary color</div>
-      <textarea></textarea></div></body></html>''', encoding="utf-8")
+      <textarea></textarea></div>
+    <div class="ZY_sub"><a class="btnSubmit" onclick="document.body.dataset.submitted='yes'">Submit</a></div>
+    </body></html>''', encoding="utf-8")
     (root / "index.html").write_text('<iframe src="work.html"></iframe>', encoding="utf-8")
     (root / "cards.html").write_text('<iframe src="index.html"></iframe>', encoding="utf-8")
     (root / "page.html").write_text('<iframe src="cards.html"></iframe>', encoding="utf-8")
@@ -37,6 +40,11 @@ with tempfile.TemporaryDirectory() as temp:
         assert app.fill_answer(driver, groups[1][1][0], "red")
         assert groups[0][1][0].options[1][2].is_selected()
         assert groups[1][1][0].element.get_attribute("value") == "red"
+        assert app.submit_homework(driver, print, threading.Event())
+        driver.switch_to.frame(driver.find_element(By.CSS_SELECTOR, "iframe"))
+        driver.switch_to.frame(driver.find_element(By.CSS_SELECTOR, "iframe"))
+        driver.switch_to.frame(driver.find_element(By.CSS_SELECTOR, "iframe"))
+        assert driver.find_element(By.TAG_NAME, "body").get_attribute("data-submitted") == "yes"
         print("Chaoxing nested-frame smoke test passed")
     finally:
         driver.quit()
