@@ -402,6 +402,7 @@ class Window(QMainWindow):
         self.config = load_config()
         self.stopped = threading.Event()
         self.busy = False
+        self.last_directory_success = None
         self._active_workers = 0
         self._close_requested = False
         self.signals = Signals()
@@ -615,6 +616,7 @@ class Window(QMainWindow):
         if not self.key_input.text().strip() and not self.show_first_run():
             return
         self.save_settings()
+        self.last_directory_success = None
         self.stopped.clear()
         self.busy = True
         self.mode_button.setEnabled(False)
@@ -633,6 +635,7 @@ class Window(QMainWindow):
         if not self.key_input.text().strip() and not self.show_first_run():
             return
         self.save_settings()
+        self.last_directory_success = False
         self.stopped.clear()
         self.busy = True
         self.mode_button.setEnabled(False)
@@ -642,8 +645,10 @@ class Window(QMainWindow):
         self.directory_button.setEnabled(False)
         self.stop_button.setEnabled(True)
         self.status.setText("正在处理课程目录…")
-        self.run_worker(lambda: process_directory(self.browser.driver, self.config,
-            self.stopped, self.signals.log.emit, solve_current_page))
+        def run_directory():
+            self.last_directory_success = process_directory(self.browser.driver, self.config,
+                self.stopped, self.signals.log.emit, solve_current_page)
+        self.run_worker(run_directory)
 
     def on_finished(self):
         self._active_workers = max(0, self._active_workers - 1)
@@ -655,7 +660,12 @@ class Window(QMainWindow):
             self.connection_button.setEnabled(True)
             self.solve_button.setEnabled(self.browser.driver is not None)
             self.directory_button.setEnabled(self.browser.driver is not None)
-            self.status.setText("处理结束，请检查网页中的答案。")
+            if self.last_directory_success is True:
+                self.status.setText("目录全部完成。")
+            elif self.last_directory_success is False:
+                self.status.setText("目录未完成，请查看运行记录。")
+            else:
+                self.status.setText("当前页处理结束，请检查网页中的答案。")
         elif self.browser.driver is None:
             self.connection_button.setEnabled(bool(self.browser.port))
             self.connection_button.setText("重新连接" if self.browser.port else "连接浏览器")
