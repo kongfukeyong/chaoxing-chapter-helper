@@ -116,27 +116,31 @@ def process_directory(driver, config, stopped, log, solve_page):
             log(f"[{index}/{len(items)}] 目录项已变化，跳过：{title}")
             continue
         log(f"[{index}/{len(items)}] 打开：{title}")
-        item.click()
-        time.sleep(2)
-        # The card iframe contains one or more task cards.
-        driver.switch_to.default_content()
-        def unfinished_videos(d):
-            cards = d.find_elements(By.CSS_SELECTOR,
-                ".ans-attach-ct.videoContainer:not(.ans-job-finished)")
-            return bool(cards)
-        if visit_frames(driver, unfinished_videos):
-            cards = driver.find_elements(By.CSS_SELECTOR, ".ans-attach-ct.videoContainer")
-            pending = [n for n, card in enumerate(cards)
-                       if "ans-job-finished" not in (card.get_attribute("class") or "")]
+        try:
+            item.click()
+            time.sleep(2)
+            # The card iframe contains one or more task cards.
             driver.switch_to.default_content()
-            for number, card_index in enumerate(pending, 1):
-                if stopped.is_set():
-                    break
-                log(f"播放视频 {number}/{len(pending)}")
-                if not play_video(driver, stopped, log, card_index):
-                    log("视频未能播放完成，继续处理当前页其他任务。")
-        driver.switch_to.default_content()
-        if solve_page(driver, config, stopped, log):
-            done += 1
+            def unfinished_videos(d):
+                cards = d.find_elements(By.CSS_SELECTOR,
+                    ".ans-attach-ct.videoContainer:not(.ans-job-finished)")
+                return bool(cards)
+            if visit_frames(driver, unfinished_videos):
+                cards = driver.find_elements(By.CSS_SELECTOR, ".ans-attach-ct.videoContainer")
+                pending = [n for n, card in enumerate(cards)
+                           if "ans-job-finished" not in (card.get_attribute("class") or "")]
+                driver.switch_to.default_content()
+                for number, card_index in enumerate(pending, 1):
+                    if stopped.is_set():
+                        break
+                    log(f"播放视频 {number}/{len(pending)}")
+                    if not play_video(driver, stopped, log, card_index):
+                        log("视频未能播放完成，继续处理当前页其他任务。")
+            driver.switch_to.default_content()
+            if solve_page(driver, config, stopped, log):
+                done += 1
+        except Exception as exc:
+            log(f"[{index}/{len(items)}] 处理失败：{title}；{str(exc)[:120]}")
+            driver.switch_to.default_content()
     driver.switch_to.default_content()
     log(f"目录处理结束：共浏览 {len(items)} 页，成功处理作业 {done} 页。")
