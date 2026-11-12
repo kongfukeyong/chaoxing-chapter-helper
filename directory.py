@@ -224,7 +224,7 @@ def play_video(driver, stopped, log, card_index=0):
     return False
 
 
-def process_directory(driver, config, stopped, log, solve_page):
+def _process_directory_pass(driver, config, stopped, log, solve_page):
     if not select_learning_window(driver):
         raise RuntimeError("专用 Edge 中没有找到学生学习页面，请先打开课程。")
     items = catalog_items(driver)
@@ -297,6 +297,8 @@ def process_directory(driver, config, stopped, log, solve_page):
                 tabs = driver.find_elements(By.CSS_SELECTOR, "#prev_tab .prev_ul li")
                 if tabs:
                     tab_count = max(tab_count, len(tabs))
+                    driver.execute_script("arguments[0].scrollIntoView({block:'center'});",
+                                          tabs[tab_index])
                     tabs[tab_index].click()
                     time.sleep(1)
                 log(f"检查内页 {tab_index + 1}/{tab_count}。")
@@ -392,3 +394,22 @@ def process_directory(driver, config, stopped, log, solve_page):
         return False
     log(f"目录全部完成：共检查 {len(items)} 项，本次提交作业 {done} 页。")
     return True
+
+
+def process_directory(driver, config, stopped, log, solve_page, retry_delay=15):
+    """Keep revisiting unfinished sections until completion or a manual stop."""
+    attempt = 0
+    while not stopped.is_set():
+        attempt += 1
+        try:
+            if _process_directory_pass(driver, config, stopped, log, solve_page):
+                return True
+        except Exception as exc:
+            if not stopped.is_set():
+                log(f"目录检查遇到错误：{str(exc)[:120]}")
+        if stopped.is_set():
+            break
+        log(f"目录尚未完成，{retry_delay:g} 秒后重新检查未完成任务（第 {attempt + 1} 轮）。")
+        stopped.wait(retry_delay)
+    log("已手动停止目录处理。")
+    return False
