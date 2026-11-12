@@ -48,15 +48,16 @@ with tempfile.TemporaryDirectory() as temp:
             d.switch_to.default_content()
             sequence.append("work")
             return True
-        directory.process_directory(driver, {}, threading.Event(), lambda _: None, solve)
+        assert directory.process_directory(driver, {}, threading.Event(), lambda _: None, solve)
         assert played == [0] and len(solved) == 2
         assert "cards1.html" in solved[0] and "cards2.html" in solved[1]
         assert sequence[:2] == ["video", "work"]
         driver.get((root / "page.html").as_uri())
         failures = []
-        directory.process_directory(driver, {}, threading.Event(), failures.append,
-                                    lambda d, config, stop, log: False)
+        assert not directory.process_directory(driver, {}, threading.Event(), failures.append,
+                                                lambda d, config, stop, log: False)
         assert any("停在当前节" in message for message in failures)
+        assert any("目录未完成" in message for message in failures)
         assert not any("打开：Work" in message for message in failures)
         (root / "tab_video.html").write_text('<div class="ans-attach-ct videoContainer"><iframe src="video.html"></iframe></div>', encoding="utf-8")
         (root / "tab_work.html").write_text('<div class="ans-attach-ct"><iframe src="work.html"></iframe></div>', encoding="utf-8")
@@ -69,7 +70,7 @@ with tempfile.TemporaryDirectory() as temp:
         solved.clear()
         sequence.clear()
         driver.get((root / "tabpage.html").as_uri())
-        directory.process_directory(driver, {}, threading.Event(), lambda _: None, solve)
+        assert directory.process_directory(driver, {}, threading.Event(), lambda _: None, solve)
         assert played == [0] and len(solved) == 1
         assert sequence == ["video", "work"]
         print("Directory traversal smoke test passed")
