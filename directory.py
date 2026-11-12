@@ -1,12 +1,53 @@
 """Walk the visible Chaoxing course catalog and its page tasks."""
 
+import ctypes
+import os
+import subprocess
 import time
+import urllib.parse
+from pathlib import Path
 
 from selenium.webdriver.common.by import By
 from chaoxing import select_learning_window
 
 
 CATALOG = ".posCatalog_name[onclick]"
+
+
+def focus_course_edge(driver):
+    """Keep the dedicated course browser visible for sites that pause background video."""
+    host = urllib.parse.urlparse(driver.current_url).hostname or ""
+    if os.name != "nt" or not host.endswith("chaoxing.com"):
+        return False
+    port_file = Path(__file__).resolve().parent / "data" / "edge-port.txt"
+    try:
+        port = int(port_file.read_text(encoding="ascii").strip())
+        command = ("Get-CimInstance Win32_Process -Filter \"name='msedge.exe'\" | "
+                   f"Where-Object CommandLine -Match '--remote-debugging-port={port}' | "
+                   "Select-Object -First 1 -ExpandProperty ProcessId")
+        result = subprocess.run(["powershell", "-NoProfile", "-Command", command],
+                                capture_output=True, text=True, timeout=8,
+                                creationflags=subprocess.CREATE_NO_WINDOW)
+        edge_pid = int(result.stdout.strip())
+        user32 = ctypes.windll.user32
+        handles = []
+        callback_type = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+        def inspect(hwnd, _):
+            pid = ctypes.c_ulong()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            if pid.value == edge_pid and user32.IsWindowVisible(hwnd):
+                handles.append(hwnd)
+            return True
+        callback = callback_type(inspect)
+        user32.EnumWindows(callback, 0)
+        if not handles:
+            return False
+        user32.ShowWindow(handles[0], 9)
+        user32.keybd_event(0x12, 0, 0, 0)
+        user32.keybd_event(0x12, 0, 2, 0)
+        return bool(user32.SetForegroundWindow(handles[0]))
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return False
 
 
 class PendingTaskError(RuntimeError):
@@ -80,6 +121,7 @@ def visit_frames(driver, callback, depth=0):
 
 def play_video(driver, stopped, log, card_index=0):
     driver.switch_to.default_content()
+    focus_course_edge(driver)
     def find_cards(d):
         return bool(d.find_elements(By.CSS_SELECTOR, ".ans-attach-ct.videoContainer"))
     if not visit_frames(driver, find_cards):
@@ -100,12 +142,14 @@ def play_video(driver, stopped, log, card_index=0):
             return False
         video = videos[0]
         d.execute_script("arguments[0].scrollIntoView({block:'center'});", video)
-        try:
-            d.execute_script("arguments[0].play();", video)
-        except Exception:
-            buttons = d.find_elements(By.CSS_SELECTOR, ".vjs-big-play-button, .vjs-play-control")
+        state = d.execute_script("return {paused:arguments[0].paused,time:arguments[0].currentTime}", video)
+        if state["paused"] or state["time"] < 1:
+            buttons = [b for b in d.find_elements(By.CSS_SELECTOR, ".vjs-big-play-button")
+                       if b.is_displayed()]
             if buttons:
                 buttons[0].click()
+            else:
+                d.execute_script("arguments[0].play();", video)
         return True
     if not visit_frames(driver, find_video):
         driver.switch_to.default_content()
@@ -117,9 +161,16 @@ def play_video(driver, stopped, log, card_index=0):
     while not stopped.is_set() and time.monotonic() - start < 4 * 3600:
         state = driver.execute_script("""const v=document.querySelector('video');
             return v ? {ended:v.ended,paused:v.paused,time:v.currentTime,
-                        duration:v.duration} : null;""")
+                        duration:v.duration,ready:v.readyState,
+                        completed:!!window.frameElement?.closest('.ans-attach-ct')
+                          ?.classList.contains('ans-job-finished')} : null;""")
         if not state:
             break
+        if state["completed"]:
+            driver.execute_script("document.querySelector('video')?.pause();")
+            log("平台已标记视频完成，继续下一个任务。")
+            driver.switch_to.default_content()
+            return True
         if state["ended"] or (state["duration"] and state["time"] >= state["duration"] - 1):
             log("视频播放结束。")
             driver.switch_to.default_content()
@@ -128,9 +179,12 @@ def play_video(driver, stopped, log, card_index=0):
             last_time = state["time"]
             last_progress = time.monotonic()
         elif time.monotonic() - last_progress > 40:
-            log("视频播放进度持续未变化，请在浏览器检查播放限制。")
+            focus_course_edge(driver)
+            log("视频媒体未加载。" if state["ready"] == 0 else
+                "视频播放进度持续未变化，请在浏览器检查播放限制。")
             break
         if state["paused"]:
+            focus_course_edge(driver)
             buttons = driver.find_elements(By.CSS_SELECTOR, ".vjs-big-play-button, .vjs-play-control")
             try:
                 if buttons:
