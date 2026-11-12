@@ -74,6 +74,21 @@ def task_state(driver):
     return videos, works
 
 
+def pending_video_indices(driver):
+    """Locate unfinished video cards after the page's card frame has loaded."""
+    driver.switch_to.default_content()
+    def has_cards(d):
+        return bool(d.find_elements(By.CSS_SELECTOR, ".ans-attach-ct"))
+    if not visit_frames(driver, has_cards):
+        driver.switch_to.default_content()
+        return None
+    cards = driver.find_elements(By.CSS_SELECTOR, ".ans-attach-ct.videoContainer")
+    pending = [index for index, card in enumerate(cards)
+               if "ans-job-finished" not in (card.get_attribute("class") or "")]
+    driver.switch_to.default_content()
+    return pending
+
+
 def catalog_items(driver):
     driver.switch_to.default_content()
     return [(item.get_attribute("onclick"), item.get_attribute("title") or item.text.strip())
@@ -144,12 +159,18 @@ def play_video(driver, stopped, log, card_index=0):
         d.execute_script("arguments[0].scrollIntoView({block:'center'});", video)
         state = d.execute_script("return {paused:arguments[0].paused,time:arguments[0].currentTime}", video)
         if state["paused"] or state["time"] < 1:
-            buttons = [b for b in d.find_elements(By.CSS_SELECTOR, ".vjs-big-play-button")
-                       if b.is_displayed()]
-            if buttons:
-                buttons[0].click()
-            else:
-                d.execute_script("arguments[0].play();", video)
+            try:
+                buttons = [b for b in d.find_elements(By.CSS_SELECTOR,
+                            ".vjs-big-play-button, .vjs-play-control")
+                           if b.is_displayed()]
+                if buttons:
+                    buttons[0].click()
+                else:
+                    d.execute_script("arguments[0].play().catch(() => {});", video)
+            except Exception:
+                # Player controls can be present before the media is ready.
+                # The monitoring loop below will retry when loading finishes.
+                pass
         return True
     if not visit_frames(driver, find_video):
         driver.switch_to.default_content()
@@ -185,7 +206,9 @@ def play_video(driver, stopped, log, card_index=0):
             break
         if state["paused"]:
             focus_course_edge(driver)
-            buttons = driver.find_elements(By.CSS_SELECTOR, ".vjs-big-play-button, .vjs-play-control")
+            buttons = [button for button in driver.find_elements(By.CSS_SELECTOR,
+                       ".vjs-big-play-button, .vjs-play-control")
+                       if button.is_displayed()]
             try:
                 if buttons:
                     buttons[0].click()
@@ -228,49 +251,94 @@ def process_directory(driver, config, stopped, log, solve_page):
         log(f"[{index}/{len(items)}] 打开：{title}")
         attempted += 1
         try:
-            item.click()
-            time.sleep(2)
-            tabs = driver.find_elements(By.CSS_SELECTOR, "#prev_tab .prev_ul li")
-            tab_count = max(1, len(tabs))
+            # A catalog click can occasionally leave Chaoxing's content area
+            # blank even though its navigation callback ran. Retry that click.
+            tab_count = 0
+            ready = False
+            for open_attempt in range(3):
+                if stopped.is_set():
+                    break
+                if open_attempt:
+                    log("内页尚未加载，重新打开当前目录项。")
+                    driver.switch_to.default_content()
+                    item = next((x for x in driver.find_elements(By.CSS_SELECTOR, CATALOG)
+                                 if x.get_attribute("onclick") == onclick), None)
+                    if item is None:
+                        break
+                item.click()
+                stable_since = time.monotonic()
+                deadline = time.monotonic() + 12
+                while not stopped.is_set() and time.monotonic() < deadline:
+                    driver.switch_to.default_content()
+                    count = len(driver.find_elements(By.CSS_SELECTOR, "#prev_tab .prev_ul li"))
+                    if count != tab_count:
+                        tab_count = count
+                        stable_since = time.monotonic()
+                    if tab_count and time.monotonic() - stable_since >= 3:
+                        ready = True
+                        break
+                    if not tab_count and task_state(driver) is not None:
+                        ready = True
+                        break
+                    time.sleep(0.5)
+                if ready:
+                    break
+            if stopped.is_set():
+                break
+            if not ready:
+                raise PendingTaskError("目录项打开后内容未加载")
+            tab_count = max(1, tab_count)
             log(f"当前节有 {tab_count} 个内页，逐页检查视频与题目。")
-            for tab_index in range(tab_count):
+            tab_index = 0
+            while tab_index < tab_count:
                 if stopped.is_set():
                     break
                 driver.switch_to.default_content()
                 tabs = driver.find_elements(By.CSS_SELECTOR, "#prev_tab .prev_ul li")
                 if tabs:
+                    tab_count = max(tab_count, len(tabs))
                     tabs[tab_index].click()
-                    time.sleep(2)
+                    time.sleep(1)
                 log(f"检查内页 {tab_index + 1}/{tab_count}。")
-                # The card iframe contains one or more task cards.
-                driver.switch_to.default_content()
-                def unfinished_videos(d):
-                    cards = d.find_elements(By.CSS_SELECTOR,
-                        ".ans-attach-ct.videoContainer:not(.ans-job-finished)")
-                    return bool(cards)
-                if visit_frames(driver, unfinished_videos):
-                    cards = driver.find_elements(By.CSS_SELECTOR, ".ans-attach-ct.videoContainer")
-                    pending = [n for n, card in enumerate(cards)
-                               if "ans-job-finished" not in (card.get_attribute("class") or "")]
-                    driver.switch_to.default_content()
+                # Never wait for an unfinished video to complete without starting it.
+                state = None
+                deadline = time.monotonic() + 25
+                while not stopped.is_set() and time.monotonic() < deadline:
+                    state = task_state(driver)
+                    if state is not None:
+                        break
+                    time.sleep(0.5)
+                if state is None:
+                    raise PendingTaskError("任务卡片未加载")
+                while state[0] and not stopped.is_set():
+                    pending = pending_video_indices(driver)
+                    if not pending:
+                        raise PendingTaskError("未找到待播放视频卡片")
                     for number, card_index in enumerate(pending, 1):
                         if stopped.is_set():
                             break
                         log(f"播放视频 {number}/{len(pending)}")
                         if not play_video(driver, stopped, log, card_index):
                             raise PendingTaskError("视频未播放完成")
-                driver.switch_to.default_content()
-                # Video completion may refresh the card frame asynchronously.
-                state = None
-                for _ in range(30):
+                    # Completion can refresh the card iframe and its task markers.
+                    deadline = time.monotonic() + 30
+                    while not stopped.is_set() and time.monotonic() < deadline:
+                        state = task_state(driver)
+                        if state is not None and state[0] == 0:
+                            break
+                        time.sleep(1)
+                    if state is None or state[0]:
+                        raise PendingTaskError("视频已结束，但平台尚未标记完成")
+                if stopped.is_set():
+                    break
+                # A card can be replaced while the video finishes.
+                for _ in range(3):
                     if stopped.is_set():
                         break
                     state = task_state(driver)
-                    if state is not None and state[0] == 0:
+                    if state is not None:
                         break
                     time.sleep(1)
-                if stopped.is_set():
-                    break
                 if state is None:
                     raise PendingTaskError("任务卡片未加载")
                 if state[0]:
@@ -288,6 +356,11 @@ def process_directory(driver, config, stopped, log, solve_page):
                     time.sleep(1)
                 if state is not None and state[1]:
                     raise PendingTaskError("作业提交后仍显示未完成")
+                driver.switch_to.default_content()
+                tab_index += 1
+                # An additional inner page may appear after the first card loads.
+                tab_count = max(tab_count, len(driver.find_elements(By.CSS_SELECTOR,
+                    "#prev_tab .prev_ul li")))
             if stopped.is_set():
                 break
             for _ in range(30):
