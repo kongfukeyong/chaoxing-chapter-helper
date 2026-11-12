@@ -160,52 +160,64 @@ def process_directory(driver, config, stopped, log, solve_page):
         try:
             item.click()
             time.sleep(2)
-            # The card iframe contains one or more task cards.
-            driver.switch_to.default_content()
-            def unfinished_videos(d):
-                cards = d.find_elements(By.CSS_SELECTOR,
-                    ".ans-attach-ct.videoContainer:not(.ans-job-finished)")
-                return bool(cards)
-            if visit_frames(driver, unfinished_videos):
-                cards = driver.find_elements(By.CSS_SELECTOR, ".ans-attach-ct.videoContainer")
-                pending = [n for n, card in enumerate(cards)
-                           if "ans-job-finished" not in (card.get_attribute("class") or "")]
-                driver.switch_to.default_content()
-                for number, card_index in enumerate(pending, 1):
-                    if stopped.is_set():
-                        break
-                    log(f"播放视频 {number}/{len(pending)}")
-                    if not play_video(driver, stopped, log, card_index):
-                        raise PendingTaskError("视频未播放完成")
-            driver.switch_to.default_content()
-            # Video completion may refresh the card frame asynchronously.
-            state = None
-            for _ in range(30):
+            tabs = driver.find_elements(By.CSS_SELECTOR, "#prev_tab .prev_ul li")
+            tab_count = max(1, len(tabs))
+            log(f"当前节有 {tab_count} 个内页，逐页检查视频与题目。")
+            for tab_index in range(tab_count):
                 if stopped.is_set():
                     break
-                state = task_state(driver)
-                if state is not None and state[0] == 0:
+                driver.switch_to.default_content()
+                tabs = driver.find_elements(By.CSS_SELECTOR, "#prev_tab .prev_ul li")
+                if tabs:
+                    tabs[tab_index].click()
+                    time.sleep(2)
+                log(f"检查内页 {tab_index + 1}/{tab_count}。")
+                # The card iframe contains one or more task cards.
+                driver.switch_to.default_content()
+                def unfinished_videos(d):
+                    cards = d.find_elements(By.CSS_SELECTOR,
+                        ".ans-attach-ct.videoContainer:not(.ans-job-finished)")
+                    return bool(cards)
+                if visit_frames(driver, unfinished_videos):
+                    cards = driver.find_elements(By.CSS_SELECTOR, ".ans-attach-ct.videoContainer")
+                    pending = [n for n, card in enumerate(cards)
+                               if "ans-job-finished" not in (card.get_attribute("class") or "")]
+                    driver.switch_to.default_content()
+                    for number, card_index in enumerate(pending, 1):
+                        if stopped.is_set():
+                            break
+                        log(f"播放视频 {number}/{len(pending)}")
+                        if not play_video(driver, stopped, log, card_index):
+                            raise PendingTaskError("视频未播放完成")
+                driver.switch_to.default_content()
+                # Video completion may refresh the card frame asynchronously.
+                state = None
+                for _ in range(30):
+                    if stopped.is_set():
+                        break
+                    state = task_state(driver)
+                    if state is not None and state[0] == 0:
+                        break
+                    time.sleep(1)
+                if stopped.is_set():
                     break
-                time.sleep(1)
-            if stopped.is_set():
-                break
-            if state is None:
-                raise PendingTaskError("任务卡片未加载")
-            if state[0]:
-                raise PendingTaskError("视频已结束，但平台尚未标记完成")
-            if state[1]:
-                log(f"发现 {state[1]} 个未完成作业任务，先处理题目。")
-                if not solve_page(driver, config, stopped, log):
-                    raise PendingTaskError("作业未全部填写并提交")
-                done += 1
-            # A successful click is not enough to advance past a pending work card.
-            for _ in range(20):
-                state = task_state(driver)
-                if state is not None and state[1] == 0:
-                    break
-                time.sleep(1)
-            if state is not None and state[1]:
-                raise PendingTaskError("作业提交后仍显示未完成")
+                if state is None:
+                    raise PendingTaskError("任务卡片未加载")
+                if state[0]:
+                    raise PendingTaskError("视频已结束，但平台尚未标记完成")
+                if state[1]:
+                    log(f"发现 {state[1]} 个未完成作业任务，先处理题目。")
+                    if not solve_page(driver, config, stopped, log):
+                        raise PendingTaskError("作业未全部填写并提交")
+                    done += 1
+                # A successful click is not enough to advance past a pending work card.
+                for _ in range(20):
+                    state = task_state(driver)
+                    if state is not None and state[1] == 0:
+                        break
+                    time.sleep(1)
+                if state is not None and state[1]:
+                    raise PendingTaskError("作业提交后仍显示未完成")
             if catalog_pending(driver, onclick):
                 raise PendingTaskError("目录仍显示未完成任务点，请检查当前节")
         except PendingTaskError as exc:
