@@ -115,6 +115,11 @@ def process_directory(driver, config, stopped, log, solve_page):
         if item is None:
             log(f"[{index}/{len(items)}] 目录项已变化，跳过：{title}")
             continue
+        container = item.find_element(By.XPATH, "./ancestor::div[contains(@class,'posCatalog_select')][1]")
+        if (container.find_elements(By.CSS_SELECTOR, ".icon_Completed")
+                and not container.find_elements(By.CSS_SELECTOR, ".jobUnfinishCount, .catalog_points_yi")):
+            log(f"[{index}/{len(items)}] 已完成，跳过：{title}")
+            continue
         log(f"[{index}/{len(items)}] 打开：{title}")
         try:
             item.click()
@@ -137,8 +142,17 @@ def process_directory(driver, config, stopped, log, solve_page):
                     if not play_video(driver, stopped, log, card_index):
                         log("视频未能播放完成，继续处理当前页其他任务。")
             driver.switch_to.default_content()
-            if solve_page(driver, config, stopped, log):
-                done += 1
+            def work_cards(d):
+                return bool(d.find_elements(By.CSS_SELECTOR, ".ans-attach-ct iframe[jobid^='work-']"))
+            if visit_frames(driver, work_cards):
+                pending_work = driver.find_elements(By.CSS_SELECTOR,
+                    ".ans-attach-ct:not(.ans-job-finished) iframe[jobid^='work-']")
+                driver.switch_to.default_content()
+                if pending_work:
+                    if solve_page(driver, config, stopped, log):
+                        done += 1
+                else:
+                    log("当前页作业任务已完成，跳过。")
         except Exception as exc:
             log(f"[{index}/{len(items)}] 处理失败：{title}；{str(exc)[:120]}")
             driver.switch_to.default_content()
