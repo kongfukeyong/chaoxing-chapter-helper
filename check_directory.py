@@ -73,6 +73,28 @@ with tempfile.TemporaryDirectory() as temp:
         assert directory.process_directory(driver, {}, threading.Event(), lambda _: None, solve)
         assert played == [0] and len(solved) == 1
         assert sequence == ["video", "work"]
+        (root / "tab_done.html").write_text('<div class="ans-attach-ct videoContainer ans-job-finished"><iframe src="video.html"></iframe></div>', encoding="utf-8")
+        (root / "delayedpage.html").write_text('''<div class="posCatalog_select"><div class="posCatalog_name" title="Delayed section" onclick="void(0)">Delayed section</div></div>
+          <div id="prev_tab"><ul class="prev_ul"><li onclick="document.querySelector('iframe').src='tab_done.html'">Done video</li></ul></div>
+          <iframe src="tab_done.html"></iframe>
+          <script>setTimeout(() => document.querySelector('.prev_ul').insertAdjacentHTML('beforeend',
+            `<li onclick="document.querySelector('iframe').src='tab_video.html'">Pending video</li>`), 2000)</script>''', encoding="utf-8")
+        played.clear()
+        solved.clear()
+        sequence.clear()
+        driver.get((root / "delayedpage.html").as_uri())
+        assert directory.process_directory(driver, {}, threading.Event(), lambda _: None, solve)
+        assert played == [0] and sequence == ["video"]
+        (root / "retry_page.html").write_text('''<script>let opens=0;function openSection(){
+          if (++opens < 2) return;
+          document.querySelector('#content').innerHTML = '<div id="prev_tab"><ul class="prev_ul"><li>Video</li></ul></div><iframe src="tab_video.html"></iframe>';
+          }</script>
+          <div class="posCatalog_select"><div class="posCatalog_name" title="Retry section" onclick="openSection()">Retry section</div></div>
+          <div id="content"></div>''', encoding="utf-8")
+        played.clear()
+        driver.get((root / "retry_page.html").as_uri())
+        assert directory.process_directory(driver, {}, threading.Event(), lambda _: None, solve)
+        assert played == [0]
         print("Directory traversal smoke test passed")
     finally:
         directory.play_video = old_play
