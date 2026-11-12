@@ -21,11 +21,13 @@ with tempfile.TemporaryDirectory() as temp:
       <li><input type="radio" name="q1" value="1">B. two</li></ul></div>
     <div class="TiMu"><div class="Zy_TItle">Name a primary color</div>
       <textarea></textarea></div>
-    <div class="ZY_sub"><a class="btnSubmit" onclick="document.body.dataset.submitted='yes'">Submit</a></div>
+    <div class="ZY_sub"><a class="btnSubmit" onclick="window.top.document.querySelector('#workpop').style.display='block'">Submit</a></div>
     </body></html>''', encoding="utf-8")
     (root / "index.html").write_text('<iframe src="work.html"></iframe>', encoding="utf-8")
     (root / "cards.html").write_text('<iframe src="index.html"></iframe>', encoding="utf-8")
-    (root / "page.html").write_text('<iframe src="cards.html"></iframe>', encoding="utf-8")
+    (root / "page.html").write_text('''<div id="workpop" style="display:block">确认提交？
+      <a onclick="document.body.dataset.submitted='yes';document.querySelector('#workpop').style.display='none'">提交</a></div>
+      <iframe src="cards.html"></iframe>''', encoding="utf-8")
     options = webdriver.EdgeOptions()
     options.add_argument("--headless=new")
     driver = webdriver.Edge(service=Service(str(Path(__file__).resolve().parent / "drivers" / "msedgedriver.exe")), options=options)
@@ -41,9 +43,6 @@ with tempfile.TemporaryDirectory() as temp:
         assert groups[0][1][0].options[1][2].is_selected()
         assert groups[1][1][0].element.get_attribute("value") == "red"
         assert app.submit_homework(driver, print, threading.Event())
-        driver.switch_to.frame(driver.find_element(By.CSS_SELECTOR, "iframe"))
-        driver.switch_to.frame(driver.find_element(By.CSS_SELECTOR, "iframe"))
-        driver.switch_to.frame(driver.find_element(By.CSS_SELECTOR, "iframe"))
         assert driver.find_element(By.TAG_NAME, "body").get_attribute("data-submitted") == "yes"
         print("Chaoxing nested-frame smoke test passed")
     finally:
