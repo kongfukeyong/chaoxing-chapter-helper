@@ -133,8 +133,78 @@ def read_homework(driver, Question, log, stopped):
     return groups
 
 
+def confirm_submit_dialog(driver, depth=0):
+    """Click the visible Chaoxing confirmation, wherever its frame lives."""
+    for dialog in driver.find_elements(By.CSS_SELECTOR,
+        "#workpop, .layui-layer, .popDiv, [role='dialog']"):
+        if not dialog.is_displayed() or "提交" not in dialog.text:
+            continue
+        for control in dialog.find_elements(By.CSS_SELECTOR,
+            "a, button, input[type='button']"):
+            label = (control.text or control.get_attribute("value") or "").strip()
+            if label in ("提交", "确认提交", "确定", "确认") and control.is_displayed():
+                control.click()
+                return True
+    if depth >= 5:
+        return False
+    for frame in driver.find_elements(By.CSS_SELECTOR, "iframe, frame"):
+        try:
+            driver.switch_to.frame(frame)
+            if confirm_submit_dialog(driver, depth + 1):
+                return True
+        except Exception:
+            pass
+        driver.switch_to.parent_frame()
+    return False
+
+
+def work_card_complete(driver, depth=0):
+    cards = [card for card in driver.find_elements(By.CSS_SELECTOR, ".ans-attach-ct")
+             if "videoContainer" not in (card.get_attribute("class") or "")
+             and card.find_elements(By.CSS_SELECTOR, "iframe")]
+    if cards:
+        return all("ans-job-finished" in (card.get_attribute("class") or "")
+                   for card in cards)
+    if depth >= 5:
+        return None
+    for frame in driver.find_elements(By.CSS_SELECTOR, "iframe, frame"):
+        try:
+            driver.switch_to.frame(frame)
+            result = work_card_complete(driver, depth + 1)
+            if result is not None:
+                return result
+        except Exception:
+            pass
+        driver.switch_to.parent_frame()
+    return None
+
+
+def wait_for_completion(driver, stopped, log):
+    for _ in range(30):
+        if stopped.is_set():
+            return False
+        driver.switch_to.default_content()
+        result = work_card_complete(driver)
+        if result is True:
+            driver.switch_to.default_content()
+            log("平台已标记作业完成。")
+            return True
+        if result is None:
+            driver.switch_to.default_content()
+            return True  # Source-only fixtures may not have the course card.
+        time.sleep(1)
+    driver.switch_to.default_content()
+    log("提交已确认，但平台仍显示作业未完成。")
+    return False
+
+
 def submit_homework(driver, log, stopped):
-    """Submit only a loaded homework frame after every parsed answer was filled."""
+    """Submit a fully answered homework and handle its cross-frame confirmation."""
+    driver.switch_to.default_content()
+    if confirm_submit_dialog(driver):
+        driver.switch_to.default_content()
+        log("已确认现有的作业提交弹窗。")
+        return wait_for_completion(driver, stopped, log)
     driver.switch_to.default_content()
     if not enter_homework_frame(driver):
         log("自动提交失败：作业题目框架已消失。")
@@ -146,32 +216,23 @@ def submit_homework(driver, log, stopped):
         driver.switch_to.default_content()
         return False
     buttons[0].click()
-    for _ in range(10):
+    for _ in range(60):
         if stopped.is_set():
             driver.switch_to.default_content()
             return False
         try:
             driver.switch_to.alert.accept()
-            break
+            driver.switch_to.default_content()
+            log("已确认浏览器提交提示。")
+            return wait_for_completion(driver, stopped, log)
         except Exception:
             pass
-        dialogs = driver.find_elements(By.CSS_SELECTOR,
-            ".layui-layer, .popDiv, .popBox, [role='dialog']")
-        accepted = False
-        for dialog in dialogs:
-            if not dialog.is_displayed():
-                continue
-            for control in dialog.find_elements(By.CSS_SELECTOR, "a, button, input[type='button']"):
-                label = (control.text or control.get_attribute("value") or "").strip()
-                if label in ("确定", "确认", "确认提交", "提交") and control.is_displayed():
-                    control.click()
-                    accepted = True
-                    break
-            if accepted:
-                break
-        if accepted:
-            break
+        driver.switch_to.default_content()
+        if confirm_submit_dialog(driver):
+            driver.switch_to.default_content()
+            log("已确认作业提交弹窗。")
+            return wait_for_completion(driver, stopped, log)
         time.sleep(0.5)
     driver.switch_to.default_content()
-    log("已触发作业提交；平台完成状态请以网页显示为准。")
-    return True
+    log("提交按钮已点击，但未找到确认结果；当前页不标记完成。")
+    return False
