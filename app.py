@@ -14,7 +14,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import whisper  # Load torch before Qt on Windows; the reverse order breaks c10.dll.
-from chaoxing import read_homework
+from chaoxing import read_homework, submit_homework
 from directory import process_directory
 from PyQt5.QtCore import QObject, Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (
@@ -38,7 +38,7 @@ PORT_FILE = ROOT / "data" / "edge-port.txt"
 DEFAULTS = {
     "api_key": "", "base_url": "https://api.deepseek.com",
     "model": "deepseek-chat", "max_tokens": 8192, "temperature": 0.3,
-    "group_by_question": True,
+    "group_by_question": True, "auto_submit": True,
 }
 
 
@@ -317,7 +317,9 @@ def solve_current_page(driver, config, stopped, log):
                     completed += 1
                 else:
                     log(f"{label}第 {question.number} 小题未能填写。")
-        log(f"已填写 {completed}/{total} 道小题。请核对后手动提交。")
+        log(f"已填写 {completed}/{total} 道小题。")
+        if completed == total and not stopped.is_set() and config.get("auto_submit", True):
+            return submit_homework(driver, log, stopped)
         return completed == total
     finally:
         driver.switch_to.default_content()
@@ -472,6 +474,11 @@ class Window(QMainWindow):
         self.mode_button.setToolTip("点击切换；按大题模式下，每道大题的 AI 请求不带入其他大题内容。")
         self.mode_button.toggled.connect(self.set_group_mode)
         card_layout.addWidget(self.mode_button)
+        self.submit_button = QPushButton("自动提交：开启" if self.config["auto_submit"] else "自动提交：关闭")
+        self.submit_button.setCheckable(True)
+        self.submit_button.setChecked(bool(self.config["auto_submit"]))
+        self.submit_button.toggled.connect(self.set_auto_submit)
+        card_layout.addWidget(self.submit_button)
         buttons = QHBoxLayout()
         self.connection_button = QPushButton("连接浏览器")
         self.connection_button.setEnabled(False)
@@ -586,6 +593,11 @@ class Window(QMainWindow):
                                  else "模式：整页一次处理")
         self.signals.log.emit("已切换到" + ("按大题独立对话" if enabled else "整页一次处理") + "模式。")
 
+    def set_auto_submit(self, enabled):
+        self.config["auto_submit"] = bool(enabled)
+        save_config(self.config)
+        self.submit_button.setText("自动提交：开启" if enabled else "自动提交：关闭")
+
     def start_solving(self):
         if not self.browser.driver or self.busy:
             return
@@ -595,6 +607,7 @@ class Window(QMainWindow):
         self.stopped.clear()
         self.busy = True
         self.mode_button.setEnabled(False)
+        self.submit_button.setEnabled(False)
         self.connection_button.setEnabled(False)
         self.solve_button.setEnabled(False)
         self.directory_button.setEnabled(False)
@@ -612,6 +625,7 @@ class Window(QMainWindow):
         self.stopped.clear()
         self.busy = True
         self.mode_button.setEnabled(False)
+        self.submit_button.setEnabled(False)
         self.connection_button.setEnabled(False)
         self.solve_button.setEnabled(False)
         self.directory_button.setEnabled(False)
@@ -625,6 +639,7 @@ class Window(QMainWindow):
         if self.busy:
             self.busy = False
             self.mode_button.setEnabled(True)
+            self.submit_button.setEnabled(True)
             self.stop_button.setEnabled(False)
             self.connection_button.setEnabled(True)
             self.solve_button.setEnabled(self.browser.driver is not None)
