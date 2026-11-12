@@ -28,6 +28,8 @@ with tempfile.TemporaryDirectory() as temp:
         directory.play_video = lambda d, stop, log, index: played.append(index) or True
         def solve(d, config, stop, log):
             solved.append(d.find_elements("css selector", "iframe")[0].get_attribute("src"))
+            if len(solved) == 1:
+                raise RuntimeError("simulated page failure")
             return True
         directory.process_directory(driver, {}, threading.Event(), lambda _: None, solve)
         assert played == [0] and len(solved) == 2
