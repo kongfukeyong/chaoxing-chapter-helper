@@ -118,8 +118,7 @@ def process_directory(driver, config, stopped, log, solve_page):
         log(f"[{index}/{len(items)}] 打开：{title}")
         item.click()
         time.sleep(2)
-        # The card iframe contains one or more task cards. Only unfinished video
-        # cards are played; homework remains for the user's manual submission.
+        # The card iframe contains one or more task cards.
         driver.switch_to.default_content()
         def unfinished_videos(d):
             cards = d.find_elements(By.CSS_SELECTOR,
@@ -140,4 +139,4 @@ def process_directory(driver, config, stopped, log, solve_page):
         if solve_page(driver, config, stopped, log):
             done += 1
     driver.switch_to.default_content()
-    log(f"目录处理结束：共浏览 {len(items)} 页，完成题目填写的页面 {done} 页。请逐页核对并手动提交作业。")
+    log(f"目录处理结束：共浏览 {len(items)} 页，成功处理作业 {done} 页。")
