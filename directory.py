@@ -8,11 +8,47 @@ from selenium.webdriver.common.by import By
 CATALOG = ".posCatalog_name[onclick]"
 
 
+class PendingTaskError(RuntimeError):
+    """The current catalog page still needs attention; do not advance."""
+
+
+def task_state(driver):
+    """Return unfinished video and homework counts from the current card frame."""
+    driver.switch_to.default_content()
+    def has_cards(d):
+        return bool(d.find_elements(By.CSS_SELECTOR, ".ans-attach-ct"))
+    if not visit_frames(driver, has_cards):
+        driver.switch_to.default_content()
+        return None
+    cards = driver.find_elements(By.CSS_SELECTOR, ".ans-attach-ct")
+    videos = sum("videoContainer" in (card.get_attribute("class") or "")
+                 and "ans-job-finished" not in (card.get_attribute("class") or "")
+                 for card in cards)
+    works = sum("videoContainer" not in (card.get_attribute("class") or "")
+                and "ans-job-finished" not in (card.get_attribute("class") or "")
+                and bool(card.find_elements(By.CSS_SELECTOR, "iframe"))
+                for card in cards)
+    driver.switch_to.default_content()
+    return videos, works
+
+
 def catalog_items(driver):
     driver.switch_to.default_content()
     return [(item.get_attribute("onclick"), item.get_attribute("title") or item.text.strip())
             for item in driver.find_elements(By.CSS_SELECTOR, CATALOG)
             if item.get_attribute("onclick")]
+
+
+def catalog_pending(driver, onclick):
+    driver.switch_to.default_content()
+    item = next((x for x in driver.find_elements(By.CSS_SELECTOR, CATALOG)
+                 if x.get_attribute("onclick") == onclick), None)
+    if item is None:
+        return False
+    container = item.find_element(By.XPATH, "./ancestor::div[contains(@class,'posCatalog_select')][1]")
+    counts = container.find_elements(By.CSS_SELECTOR, ".jobUnfinishCount")
+    return any((x.get_attribute("value") or "0").isdigit()
+               and int(x.get_attribute("value")) > 0 for x in counts)
 
 
 def visit_frames(driver, callback, depth=0):
@@ -140,21 +176,45 @@ def process_directory(driver, config, stopped, log, solve_page):
                         break
                     log(f"播放视频 {number}/{len(pending)}")
                     if not play_video(driver, stopped, log, card_index):
-                        log("视频未能播放完成，继续处理当前页其他任务。")
+                        raise PendingTaskError("视频未播放完成")
             driver.switch_to.default_content()
-            def work_cards(d):
-                return bool(d.find_elements(By.CSS_SELECTOR, ".ans-attach-ct iframe[jobid^='work-']"))
-            if visit_frames(driver, work_cards):
-                pending_work = driver.find_elements(By.CSS_SELECTOR,
-                    ".ans-attach-ct:not(.ans-job-finished) iframe[jobid^='work-']")
-                driver.switch_to.default_content()
-                if pending_work:
-                    if solve_page(driver, config, stopped, log):
-                        done += 1
-                else:
-                    log("当前页作业任务已完成，跳过。")
+            # Video completion may refresh the card frame asynchronously.
+            state = None
+            for _ in range(30):
+                if stopped.is_set():
+                    break
+                state = task_state(driver)
+                if state is not None and state[0] == 0:
+                    break
+                time.sleep(1)
+            if stopped.is_set():
+                break
+            if state is None:
+                raise PendingTaskError("任务卡片未加载")
+            if state[0]:
+                raise PendingTaskError("视频已结束，但平台尚未标记完成")
+            if state[1]:
+                log(f"发现 {state[1]} 个未完成作业任务，先处理题目。")
+                if not solve_page(driver, config, stopped, log):
+                    raise PendingTaskError("作业未全部填写并提交")
+                done += 1
+            # A successful click is not enough to advance past a pending work card.
+            for _ in range(20):
+                state = task_state(driver)
+                if state is not None and state[1] == 0:
+                    break
+                time.sleep(1)
+            if state is not None and state[1]:
+                raise PendingTaskError("作业提交后仍显示未完成")
+            if catalog_pending(driver, onclick):
+                raise PendingTaskError("目录仍显示未完成任务点，请检查当前节")
+        except PendingTaskError as exc:
+            log(f"[{index}/{len(items)}] 停在当前节：{title}；{exc}")
+            driver.switch_to.default_content()
+            break
         except Exception as exc:
-            log(f"[{index}/{len(items)}] 处理失败：{title}；{str(exc)[:120]}")
+            log(f"[{index}/{len(items)}] 停在当前节：{title}；{str(exc)[:120]}")
             driver.switch_to.default_content()
+            break
     driver.switch_to.default_content()
     log(f"目录处理结束：共浏览 {len(items)} 页，成功处理作业 {done} 页。")
