@@ -1,6 +1,7 @@
 """Read visible Chaoxing chapter homework from its nested frames."""
 
 import re
+import time
 
 from selenium.webdriver.common.by import By
 
@@ -75,3 +76,47 @@ def read_homework(driver, Question, log, stopped):
     if not groups:
         log("已进入超星作业框架，但没有找到可填写的题目；请确认作业已加载且处于答题状态。")
     return groups
+
+
+def submit_homework(driver, log, stopped):
+    """Submit only a loaded homework frame after every parsed answer was filled."""
+    driver.switch_to.default_content()
+    if not enter_homework_frame(driver):
+        log("自动提交失败：作业题目框架已消失。")
+        return False
+    buttons = [x for x in driver.find_elements(By.CSS_SELECTOR, ".ZY_sub a.btnSubmit")
+               if x.is_displayed() and x.is_enabled()]
+    if len(buttons) != 1:
+        log("自动提交失败：未找到唯一的作业提交按钮。")
+        driver.switch_to.default_content()
+        return False
+    buttons[0].click()
+    for _ in range(10):
+        if stopped.is_set():
+            driver.switch_to.default_content()
+            return False
+        try:
+            driver.switch_to.alert.accept()
+            break
+        except Exception:
+            pass
+        dialogs = driver.find_elements(By.CSS_SELECTOR,
+            ".layui-layer, .popDiv, .popBox, [role='dialog']")
+        accepted = False
+        for dialog in dialogs:
+            if not dialog.is_displayed():
+                continue
+            for control in dialog.find_elements(By.CSS_SELECTOR, "a, button, input[type='button']"):
+                label = (control.text or control.get_attribute("value") or "").strip()
+                if label in ("确定", "确认", "确认提交", "提交") and control.is_displayed():
+                    control.click()
+                    accepted = True
+                    break
+            if accepted:
+                break
+        if accepted:
+            break
+        time.sleep(0.5)
+    driver.switch_to.default_content()
+    log("已触发作业提交；平台完成状态请以网页显示为准。")
+    return True
