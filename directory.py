@@ -52,6 +52,16 @@ def catalog_pending(driver, onclick):
                and int(x.get_attribute("value")) > 0 for x in counts)
 
 
+def remaining_catalog_items(driver):
+    driver.switch_to.default_content()
+    return driver.execute_script("""return [...document.querySelectorAll('.posCatalog_name[onclick]')]
+      .filter(x => {const c=x.closest('.posCatalog_select');
+        if(!c)return false;
+        const n=c.querySelector('.jobUnfinishCount');
+        return (n && Number(n.value)>0) || !!c.querySelector('.catalog_points_yi');
+      }).length""")
+
+
 def visit_frames(driver, callback, depth=0):
     if callback(driver):
         return True
@@ -145,6 +155,8 @@ def process_directory(driver, config, stopped, log, solve_page):
         raise RuntimeError("当前页未找到超星课程目录，请先打开课程的学生学习页面。")
     log(f"目录共有 {len(items)} 个页面，开始逐页处理。")
     done = 0
+    attempted = 0
+    halt_reason = ""
     for index, (onclick, title) in enumerate(items, 1):
         if stopped.is_set():
             break
@@ -160,6 +172,7 @@ def process_directory(driver, config, stopped, log, solve_page):
             log(f"[{index}/{len(items)}] 已完成，跳过：{title}")
             continue
         log(f"[{index}/{len(items)}] 打开：{title}")
+        attempted += 1
         try:
             item.click()
             time.sleep(2)
@@ -221,15 +234,34 @@ def process_directory(driver, config, stopped, log, solve_page):
                     time.sleep(1)
                 if state is not None and state[1]:
                     raise PendingTaskError("作业提交后仍显示未完成")
+            if stopped.is_set():
+                break
+            for _ in range(30):
+                if not catalog_pending(driver, onclick) or stopped.is_set():
+                    break
+                time.sleep(1)
             if catalog_pending(driver, onclick):
                 raise PendingTaskError("目录仍显示未完成任务点，请检查当前节")
         except PendingTaskError as exc:
+            halt_reason = f"第 {index} 项 {title}：{exc}"
             log(f"[{index}/{len(items)}] 停在当前节：{title}；{exc}")
             driver.switch_to.default_content()
             break
         except Exception as exc:
+            halt_reason = f"第 {index} 项 {title}：{str(exc)[:120]}"
             log(f"[{index}/{len(items)}] 停在当前节：{title}；{str(exc)[:120]}")
             driver.switch_to.default_content()
             break
     driver.switch_to.default_content()
-    log(f"目录处理结束：共浏览 {len(items)} 页，成功处理作业 {done} 页。")
+    remaining = remaining_catalog_items(driver)
+    if stopped.is_set():
+        log(f"已停止：本次打开 {attempted} 项，仍有 {remaining} 项未完成。")
+        return False
+    if halt_reason:
+        log(f"目录未完成：停在{halt_reason}；仍有 {remaining} 项未完成。")
+        return False
+    if remaining:
+        log(f"目录未完成：本次打开 {attempted} 项，仍有 {remaining} 项未完成。")
+        return False
+    log(f"目录全部完成：共检查 {len(items)} 项，本次提交作业 {done} 页。")
+    return True
