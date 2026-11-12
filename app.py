@@ -15,6 +15,7 @@ from pathlib import Path
 
 import whisper  # Load torch before Qt on Windows; the reverse order breaks c10.dll.
 from chaoxing import read_homework
+from directory import process_directory
 from PyQt5.QtCore import QObject, Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (
     QApplication, QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -481,6 +482,10 @@ class Window(QMainWindow):
         self.solve_button.setEnabled(False)
         self.solve_button.clicked.connect(self.start_solving)
         buttons.addWidget(self.solve_button)
+        self.directory_button = QPushButton("处理整个课程目录")
+        self.directory_button.setEnabled(False)
+        self.directory_button.clicked.connect(self.start_directory)
+        buttons.addWidget(self.directory_button)
         self.stop_button = QPushButton("停止")
         self.stop_button.setEnabled(False)
         self.stop_button.clicked.connect(self.stopped.set)
@@ -563,6 +568,7 @@ class Window(QMainWindow):
         self.connection_button.setText("暂时断开")
         self.connection_button.setEnabled(True)
         self.solve_button.setEnabled(True)
+        self.directory_button.setEnabled(True)
         self.signals.log.emit("浏览器已连接。")
 
     def on_disconnected(self):
@@ -570,6 +576,7 @@ class Window(QMainWindow):
         self.connection_button.setText("重新连接")
         self.connection_button.setEnabled(True)
         self.solve_button.setEnabled(False)
+        self.directory_button.setEnabled(False)
         self.signals.log.emit("已暂时断开浏览器。")
 
     def set_group_mode(self, enabled):
@@ -590,10 +597,28 @@ class Window(QMainWindow):
         self.mode_button.setEnabled(False)
         self.connection_button.setEnabled(False)
         self.solve_button.setEnabled(False)
+        self.directory_button.setEnabled(False)
         self.stop_button.setEnabled(True)
         self.status.setText("正在处理当前试卷…")
         self.run_worker(lambda: solve_current_page(self.browser.driver, self.config,
                                                    self.stopped, self.signals.log.emit))
+
+    def start_directory(self):
+        if not self.browser.driver or self.busy:
+            return
+        if not self.key_input.text().strip() and not self.show_first_run():
+            return
+        self.save_settings()
+        self.stopped.clear()
+        self.busy = True
+        self.mode_button.setEnabled(False)
+        self.connection_button.setEnabled(False)
+        self.solve_button.setEnabled(False)
+        self.directory_button.setEnabled(False)
+        self.stop_button.setEnabled(True)
+        self.status.setText("正在处理课程目录…")
+        self.run_worker(lambda: process_directory(self.browser.driver, self.config,
+            self.stopped, self.signals.log.emit, solve_current_page))
 
     def on_finished(self):
         self._active_workers = max(0, self._active_workers - 1)
@@ -603,15 +628,18 @@ class Window(QMainWindow):
             self.stop_button.setEnabled(False)
             self.connection_button.setEnabled(True)
             self.solve_button.setEnabled(self.browser.driver is not None)
+            self.directory_button.setEnabled(self.browser.driver is not None)
             self.status.setText("处理结束，请检查网页中的答案。")
         elif self.browser.driver is None:
             self.connection_button.setEnabled(bool(self.browser.port))
             self.connection_button.setText("重新连接" if self.browser.port else "连接浏览器")
             self.solve_button.setEnabled(False)
+            self.directory_button.setEnabled(False)
         else:
             self.connection_button.setEnabled(True)
             self.connection_button.setText("暂时断开")
             self.solve_button.setEnabled(True)
+            self.directory_button.setEnabled(True)
         if self._close_requested and self._active_workers == 0:
             self._close_requested = False
             self.close()
