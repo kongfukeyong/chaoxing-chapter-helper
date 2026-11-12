@@ -21,6 +21,8 @@ Windows 桌面工具，处理当前打开的超星章节作业。连接专用 Ed
 
 API Key 仅写入本机 `config.json`；专用浏览器资料位于 `data/edge-profile`。这些目录和文件被 `.gitignore` 排除。
 
+程序启动时会向 `https://infox.kongfu.xyz/` 发送一次固定请求，统计启动次数。请求不附带账号、API Key 或设备 ID；Cloudflare 的常规访问日志可能包含 IP 和 User-Agent。可在 `config.json` 中将 `usage_ping` 设为 `false` 关闭此请求。
+
 ## 来源与许可
 
 本项目从 [YSJohnson/UnipusAI-Helper](https://github.com/YSJohnson/UnipusAI-Helper) 的修改版分离而来，遵循 GNU AGPL-3.0，见 [LICENSE](LICENSE)。
