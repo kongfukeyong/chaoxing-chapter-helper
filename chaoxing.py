@@ -42,13 +42,28 @@ def read_homework(driver, Question, log, stopped):
         fields = [x for x in block.find_elements(By.CSS_SELECTOR, FIELD_SELECTOR)
                   if x.is_displayed() and x.is_enabled()]
         if not fields:
-            continue
+            visual_choices = block.find_elements(By.CSS_SELECTOR, ".Zy_ulTop li[onclick]")
+            if not visual_choices:
+                continue
+        else:
+            visual_choices = []
         titles = block.find_elements(By.CSS_SELECTOR, ".Zy_TItle, .Zy_TItle_p, .questionTitle, .stem")
         title = (titles[0].text if titles else block.text).strip()
         title = re.sub(r"\s+", " ", title)[:4000]
         if not title:
             continue
         questions = []
+        if visual_choices:
+            qtype = visual_choices[0].get_attribute("qtype")
+            options = []
+            for index, item in enumerate(visual_choices):
+                letter = chr(65 + index)
+                parts = item.find_elements(By.CSS_SELECTOR, "a")
+                label = (parts[0].text if parts else item.text).strip()
+                options.append((letter, label or letter, item))
+            kind = "multiple" if qtype == "1" else "single"
+            questions.append(Question(1, kind, title, options=options,
+                                      choice_style="chaoxing"))
         by_name = {}
         for field in fields:
             kind = (field.get_attribute("type") or "").lower()
