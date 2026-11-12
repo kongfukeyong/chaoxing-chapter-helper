@@ -35,11 +35,26 @@ CONFIG = ROOT / "config.json"
 CONFIG_TEMPLATE = ROOT / "config.template.json"
 PROFILE = ROOT / "data" / "edge-profile"
 PORT_FILE = ROOT / "data" / "edge-port.txt"
+LAUNCH_SIGNAL_URL = "https://infox.kongfu.xyz/?source=chaoxing-chapter-helper&event=launch"
 DEFAULTS = {
     "api_key": "", "base_url": "https://api.deepseek.com",
     "model": "deepseek-chat", "max_tokens": 8192, "temperature": 0.3,
-    "group_by_question": True, "auto_submit": True,
+    "group_by_question": True, "auto_submit": True, "usage_ping": True,
 }
+
+
+def send_launch_signal():
+    """Send one best-effort startup request without user configuration data."""
+    if not load_config().get("usage_ping", True):
+        return
+    try:
+        request = urllib.request.Request(LAUNCH_SIGNAL_URL,
+            headers={"User-Agent": "Chaoxing-Helper/0.1.1"})
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(request, timeout=5) as response:
+            response.read(1)
+    except Exception:
+        pass  # Offline or blocked telemetry must never affect the app.
 
 
 def load_config():
@@ -705,6 +720,7 @@ def main():
     app = QApplication(sys.argv)
     window = Window()
     window.show()
+    threading.Thread(target=send_launch_signal, daemon=True).start()
     sys.exit(app.exec_())
 
 
