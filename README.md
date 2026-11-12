@@ -1,2 +1,24 @@
-# chaoxing-chapter-helper
-超星章节作业桌面助手
+# 超星章节作业助手
+
+Windows 桌面工具，处理当前打开的超星章节作业。连接专用 Edge 后，在作业页面点击“快速处理当前页”，程序读取可见题目、调用用户配置的 AI 服务并填写答案。答案由用户核对和手动提交。
+
+## D 盘便携版
+
+1. 双击 `start.cmd`。首次启动填写自己的 AI API Key、接口地址和模型。
+2. 在打开的 Edge 中登录超星，完成验证，再点击“连接浏览器”。
+3. 打开章节作业，等待题目显示，点击“快速处理当前页”。
+4. 核对网页中的答案并自行提交。
+
+可点击“暂时断开”，完成手动操作后再点“重新连接”。“按大题独立对话”逐题组调用 AI，“整页一次处理”将当前页题目放在一次请求中。
+
+程序识别嵌套 iframe 内的 `.TiMu` 或 `.questionLi` 容器，支持可见的单选、多选和文本输入。视频任务不属于当前版本的处理范围。保存网页的静态副本不含动态加载后的作业题目，因此当前版本已用本机嵌套 iframe 测试页验证读取与填写，实际超星页面仍需在登录后的作业页核对。
+
+## 源码运行
+
+准备 Python 3.12、Edge 和 FFmpeg，安装 `requirements.txt` 后运行 `python app.py`。Windows 便携版自带运行时和驱动。
+
+API Key 仅写入本机 `config.json`；专用浏览器资料位于 `data/edge-profile`。这些目录和文件被 `.gitignore` 排除。
+
+## 来源与许可
+
+本项目从 [YSJohnson/UnipusAI-Helper](https://github.com/YSJohnson/UnipusAI-Helper) 的修改版分离而来，遵循 GNU AGPL-3.0，见 [LICENSE](LICENSE)。
