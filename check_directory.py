@@ -58,6 +58,20 @@ with tempfile.TemporaryDirectory() as temp:
                                     lambda d, config, stop, log: False)
         assert any("停在当前节" in message for message in failures)
         assert not any("打开：Work" in message for message in failures)
+        (root / "tab_video.html").write_text('<div class="ans-attach-ct videoContainer"><iframe src="video.html"></iframe></div>', encoding="utf-8")
+        (root / "tab_work.html").write_text('<div class="ans-attach-ct"><iframe src="work.html"></iframe></div>', encoding="utf-8")
+        (root / "tabpage.html").write_text('''<div class="posCatalog_select"><div class="posCatalog_name" title="One section" onclick="void(0)">One section</div></div>
+          <div id="prev_tab"><ul class="prev_ul">
+          <li onclick="document.querySelector('iframe').src='tab_video.html'">Video</li>
+          <li onclick="document.querySelector('iframe').src='tab_work.html'">Quiz</li>
+          </ul></div><iframe src="tab_video.html"></iframe>''', encoding="utf-8")
+        played.clear()
+        solved.clear()
+        sequence.clear()
+        driver.get((root / "tabpage.html").as_uri())
+        directory.process_directory(driver, {}, threading.Event(), lambda _: None, solve)
+        assert played == [0] and len(solved) == 1
+        assert sequence == ["video", "work"]
         print("Directory traversal smoke test passed")
     finally:
         directory.play_video = old_play
