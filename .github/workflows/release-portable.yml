@@ -1,0 +1,46 @@
+name: Publish portable ZIP
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build from the previous portable release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $old = Join-Path $env:RUNNER_TEMP 'previous'
+          $stage = Join-Path $env:RUNNER_TEMP 'stage'
+          $zip = Join-Path $env:RUNNER_TEMP 'Chaoxing-Helper-portable-win64.zip'
+          New-Item -ItemType Directory -Force -Path $old, $stage | Out-Null
+          gh release download v0.1.2 --repo $env:GITHUB_REPOSITORY --pattern 'Chaoxing-Helper-portable-win64.zip' --dir $old
+          Expand-Archive (Join-Path $old 'Chaoxing-Helper-portable-win64.zip') -DestinationPath $stage
+          $app = Join-Path $stage 'Chaoxing-Helper'
+          foreach ($name in @('directory.py', 'check_directory.py', 'README.md')) {
+            Copy-Item -LiteralPath $name -Destination (Join-Path $app $name) -Force
+          }
+          if (Test-Path (Join-Path $app 'config.json')) { throw 'Private config in package' }
+          if (Test-Path (Join-Path $app 'data/edge-profile')) { throw 'Browser profile in package' }
+          Push-Location $stage
+          try {
+            $sevenZip = 'C:\Program Files\7-Zip\7z.exe'
+            if (Test-Path $sevenZip) {
+              & $sevenZip a -tzip -mx=1 $zip 'Chaoxing-Helper' | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw 'ZIP creation failed' }
+            } else {
+              Compress-Archive -Path 'Chaoxing-Helper' -DestinationPath $zip -CompressionLevel Fastest
+            }
+          } finally {
+            Pop-Location
+          }
+          $digest = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          gh release upload v0.1.3 $zip --repo $env:GITHUB_REPOSITORY --clobber
+          gh release edit v0.1.3 --repo $env:GITHUB_REPOSITORY --draft=false --notes "Windows 便携版。目录未完成时持续重试，直到全部完成或手动停止；修复章节测验标签点击。SHA-256: $digest"
+          Write-Output "SHA-256: $digest"
